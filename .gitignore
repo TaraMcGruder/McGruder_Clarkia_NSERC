@@ -2,3 +2,8 @@
 .Rhistory
 .RData
 .Ruserdata
+PNW_occurrence_cleaned.csv
+CCH2_occurrences_cleaned.csv
+GBIF_occurrence_cleaned.csv
+INAT_occurrence_cleaned.csv
+ 
