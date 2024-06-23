@@ -297,8 +297,8 @@ PNW_subset <- PNW_occurrence_data_columnclean %>%
 
 #Smushing subsetted data together ----
 occurrence_subsets_combined <- bind_rows(GBIF_subset, INAT_subset, CCH2_subset, PNW_subset)
-  #This doesn't work, I guess because the latitude values are   different types of data (fixed this with mutate: double to    make all of the latitude and longitude values in double       format)
-  #Now getting error surrounding the date format (fixed by      making all of the dates the same format)
+#This doesn't work, I guess because the latitude values are   different types of data (fixed this with mutate: double to    make all of the latitude and longitude values in double       format)
+#Now getting error surrounding the date format (fixed by      making all of the dates the same format)
 
 #Cleaning smushed subsetted data frame ----
 
@@ -321,7 +321,7 @@ distinct_noNA_occurrence_subsets_3.0 <- distinct_noNA_occurrence_subsets_2.0 %>%
 Clarkia viminea"))
 # we have Clarkia mosquinii but not Clarkia mosquinii mosquinii
 #merge Clarkia Biloba with Clarkia biloba occurrences (make sure you merge with the same datasource)
-  #do the same for Clarkia Williamsonii, C. Unguiculata, Clarkia purpurea subsp. Quadrivulnera
+#do the same for Clarkia Williamsonii, C. Unguiculata, Clarkia purpurea subsp. Quadrivulnera
 #This filter is not getting rid of some of the things I filtered
 
 
@@ -381,8 +381,9 @@ distinct_species_counts <- distinct_noNA_occurrence_subsets_3.0 %>%
 
 
 #conclusions: none of this works, it is not filtering things out correctly
-  #Maybe I just spelled things wrong, will double check
+#Maybe I just spelled things wrong, will double check
 
 
 
 # Mapping each Species_Subspecies onto maps ---- 
+
