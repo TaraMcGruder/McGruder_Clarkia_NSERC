@@ -357,7 +357,7 @@ distinct_noNA_occurrence_subsets_4.0 <- distinct_noNA_occurrence_subsets_3.0 %>%
 
 #Ensure only specified species are included
 distinct_noNA_occurrence_subsets_5.0 <- distinct_noNA_occurrence_subsets_4.0 %>%
-  filter(str_detect(str_to_lower(Species_Subspecies), paste(str_to_lower(specified_words), collapse = "|")))
+  filter(str_detect(str_to_lower(Species_Subspecies), paste(str_to_lower(unwanted_species), collapse = "|")))
 #I'm not sure how this is working cause CHatGPT did this but it's useless anyway
 
 #species counts table
