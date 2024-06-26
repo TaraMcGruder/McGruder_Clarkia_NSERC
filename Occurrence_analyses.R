@@ -10,7 +10,8 @@ library(rnaturalearthdata)
 
 # Read in CSV file (GBIF) ----
 # occurrence_data <- read.csv("C:/Users/taram/Documents/Lab Analysis/NSERC USRA/Clarkia_OccurrenceData_GBIF/GBIF_occurrence_cleaned.csv")
-setwd("C:/Users/taram/Documents/Lab Analysis/NSERC USRA/Rproject_Clarkia_NSERC")
+# setwd("C:/Users/taram/Documents/Lab Analysis/NSERC USRA/Rproject_Clarkia_NSERC")
+# MB: if you begin by opening the Rproject for this project (so that it says McGruder_Clarkia_NSERC in the upper right corner), you won't have to set the working directory, it will happen automatically
 
 list.files()
 
@@ -133,6 +134,228 @@ print(PNW_species_count_df)
 # Now that I have all of the occurrence data, how do I go about combining data from the above three to make sure all occurrences are >100? 
 # Based on the GBIF data, we need more occurrences for C. exilis (none have higher occurrence than GBIF), C. imbricata (none have higher occurrence than GBIF), C. lingulata (none have higher occurrence than GBIF), and C. virgata (none have higher occurrence than GBIF)
 
+# MB: I moved the map code you had here down
+
+#Subsetting each data frame ---- 
+# Example code for how to select and rename columns, and filter to a certain range of latitudes
+# new_data = occurrence_data %>% 
+#   select(taxon = species, yr = year) %>% 
+#   filter(decimalLatitude > 35 & decimalLatitude < 55)
+
+
+# GBIF Subset
+GBIF_subset <- occurrence_speciesclean %>%
+  select(speciesSubspecies, decimalLatitude, decimalLongitude, year, month, day) %>%
+  mutate(Data_Source = "GBIF") %>%
+  unite(col = Date, year, month, day, sep = "-", remove = TRUE) %>%
+  mutate(Date = as.Date(Date, format = "%Y-%m-%d")) %>%
+  # MB: I stitched date to captial so it would be the same style as your other column names
+  rename(
+    Species_Subspecies = speciesSubspecies,
+    Latitude = decimalLatitude,
+    Longitude = decimalLongitude,
+    # Data_Source = datasource 
+    # MB: You can give this the name you want when you first create it above
+  ) %>%
+  mutate(Latitude = as.double(Latitude), Longitude = as.double(Longitude))
+
+# INAT Subset
+INAT_subset <- INAT_occurrence_data_columnclean %>%
+  select(scientific_name, latitude, longitude, observed_on) %>%
+  mutate(Data_Source = "INAT") %>%
+  rename(
+    Species_Subspecies = scientific_name, 
+    Latitude = latitude,
+    Longitude = longitude,
+    Date = observed_on,
+    # Data_Source = datasource
+  ) %>%
+  mutate(Latitude = as.double(Latitude), Longitude = as.double(Longitude), Date = as.Date(Date))
+
+# CCH2 Subset
+CCH2_subset <- CCH2_occurrence_data_columnclean %>%
+  select(scientificName, decimalLatitude, decimalLongitude, eventDate, eventDate2) %>%
+  mutate(Data_Source = "CCH2") %>%
+  rename(
+    Species_Subspecies = scientificName, 
+    Latitude = decimalLatitude,
+    Longitude = decimalLongitude,
+    # Data_Source = datasource
+  ) %>%
+  mutate(Date = coalesce(eventDate, eventDate2)) %>%
+  select(-eventDate, -eventDate2) %>%
+  mutate(Latitude = as.double(Latitude), Longitude = as.double(Longitude), Date = as.Date(Date))
+
+# PNW Subset
+PNW_subset <- PNW_occurrence_data_columnclean %>%
+  select(Scientific.Name, Decimal.Latitude, Decimal.Longitude, Day.Collected, Month.Collected, Year.Collected) %>%
+  unite(col = Date, Year.Collected, Month.Collected, Day.Collected, sep = "-", remove = TRUE) %>%
+  mutate(Date = as.Date(Date, format = "%Y-%m-%d")) %>%
+  mutate(Data_Source = "PNW") %>%
+  rename(
+    Species_Subspecies = Scientific.Name, 
+    Latitude = Decimal.Latitude,
+    Longitude = Decimal.Longitude,
+    # Data_Source = datasource
+  ) %>%
+  mutate(Latitude = as.double(Latitude), Longitude = as.double(Longitude))
+
+
+#Smushing subsetted data together ----
+occurrence_subsets_combined <- bind_rows(GBIF_subset, INAT_subset, CCH2_subset, PNW_subset)
+  
+#This doesn't work, I guess because the latitude values are   different types of data (fixed this with mutate: double to    make all of the latitude and longitude values in double       format)
+#Now getting error surrounding the date format (fixed by      making all of the dates the same format)
+
+# MB: Amazing job getting to this step! This stuff is not easy and you figured out some really tricky issues.
+# MB: before moving on to next steps, here I'm going to just explore what we have a bit
+
+summary(occurrence_subsets_combined)
+# MB: we can drop lat/longs that are NA or -9999 (sometimes that gets put in instead of NA) before moving on to next steps, I'm adding this above.
+
+table(occurrence_subsets_combined$Species_Subspecies)
+# MB: the other thing to deal with, which was probably what was messing up the filtering steps in your code below, is inconsistencies in species name formats across datasets. For example, ssp. vs. subsp., some have an extra whitespace (ugh!), etc. I'm going to add a step above that strips them down to just two or three word strings. Let's also get rid of stuff that doesn't have the genus listed as Clarkia (I see you were doing this below. And we can get rid of any that have just "Clarkia" with no species name.
+
+occurrence_subsets_combined <- bind_rows(CCH2_subset, PNW_subset, INAT_subset, GBIF_subset) %>% 
+  filter(!is.na(Latitude), !is.na(Longitude), Latitude != -9999, Longitude !=-9999) %>% 
+  # Must have clarkia in the name
+  filter(str_detect(Species_Subspecies, "Clarkia")) %>% 
+  # but not JUST clarkia
+  filter(!Species_Subspecies %in% c("Clarkia", "clarkia")) %>% 
+  # remove all "subsp." "ssp." etc
+  mutate(Species_Subspecies = str_remove(Species_Subspecies, "subsp.")) %>% 
+  mutate(Species_Subspecies = str_remove(Species_Subspecies, "ssp.")) %>% 
+  mutate(Species_Subspecies = str_remove(Species_Subspecies, "var.")) %>% 
+  # Get rid of extra whitespace
+  mutate(Species_Subspecies = str_squish(Species_Subspecies)) %>% 
+  # deal with capitalization inconsistencies (this is a new trick for me)
+  mutate(Species_Subspecies = str_to_sentence(Species_Subspecies)) %>% 
+  mutate(Species_Subspecies = str_replace_all(Species_Subspecies, "Clarkia mildredae", "Clarkia mildrediae")) %>% 
+  mutate(Species_Subspecies = str_replace_all(Species_Subspecies, "Clarkia temblorensis temblorensis", "Clarkia tembloriensis tembloriensis")) %>% 
+  mutate(Species_Subspecies = str_replace_all(Species_Subspecies, "Clarkia biloba brandegeae", "Clarkia biloba brandegeeae")) %>% 
+  mutate(Species_Subspecies = str_replace_all(Species_Subspecies, "Clarkia biloba brandegeei", "Clarkia biloba brandegeeae"))
+
+table(occurrence_subsets_combined$Species_Subspecies)
+
+# MB: Okay! Now when I look at this list, what is inconsistent still?
+# Not checking if all are in phylogeny, will just fix quick
+# Clarkia biloba brandegeae          Clarkia biloba brandegeeae           Clarkia biloba brandegeei
+# Clarkia mildredae                  Clarkia mildrediae
+# Clarkia temblorensis temblorensis  Clarkia tembloriensis tembloriensis
+
+# MB: list of species with subspecies to mull over
+# xantiana
+# tenella
+# tembloriensis
+# speciosa
+# rubicunda - no ssp in phy
+# quadrivvulnera (maybe needs to be nested in purpurea?)
+# purpurea
+# mosquinii - no ssp in phy
+# mildrediae
+# gracilis
+# cylindrica
+# concinna
+# borealis
+# biloba
+# amoena
+
+
+
+#Cleaning smushed subsetted data frame ----
+
+##Omitting duplicate rows (i.e. getting rid of duplicate occurrences) ----
+distinct_occurrence_subsets <- occurrence_subsets_combined %>%
+  distinct(Species_Subspecies, Latitude, Longitude, Date, .keep_all = TRUE)
+  # MB: I'm modifying it to keep rows that are distinct across species and date too
+# I am pretty sure this code only keeps the FIRST occurrence if there are duplicate lat/long coordinates -- double check
+# MB: I think there are still some duplicates in here for reasons I can explain tomorrow and I'll add something to deal with it. For now though, this is getting closer. 
+
+options(digits=10)
+
+table(distinct_occurrence_subsets$Species_Subspecies)
+
+##Getting rid of rows with any NAs ----
+# distinct_noNA_occurrence_subsets <- distinct_occurrence_subsets %>%
+  # drop_na()
+# MB: this is great, I added a line that does this above
+
+##Cleaning: omitting Godetia, merging mildredae, etc. ----
+# distinct_noNA_occurrence_subsets_2.0 <- distinct_noNA_occurrence_subsets %>%
+#   filter(!str_detect(Species_Subspecies, "Godetia"))
+# MB: this is also great, I added a line above that filters to just clarkia
+
+distinct_noNA_occurrence_subsets_3.0 <- distinct_noNA_occurrence_subsets_2.0 %>%
+  # mutate(Species_Subspecies = str_replace_all(Species_Subspecies, "Clarkia mildredae", "Clarkia mildrediae")) %>% MB: This is great, moving it up
+  filter(!Species_Subspecies %in% c("Clarkia modesta", "Clarkia springvillensis", "Clarkia heterandra", "Clarkia jolonensis", "Clarkia australis", "Godetia sparsiflora", "Clarkia romanzovii", "Clarkia", "clarkia","Clarkia deflexa", "Clarkia elegans", "Clarkia grandiflora", "Clarkia tembloriensis longistyla", "Clarkia rubicunda blasdalei", "Clarkia elegans", "Clarkia rubicunda subsp. blasdalei", "Heterogaura heterandra", "Clarkia amoena pacifica", "Clarkia mosquinii mosquinii", "Clarkia mosquinii subsp. mosquinii", "Clarkia mosquinii subsp. xerophila", "Clarkia blasdalei", "Clarkia calientensis", "Clarkia bifrons", "Clarkia concinnum", "Clarkia goddardii", "Clarkia lindleyi", "Clarkia mosquinii xerophylla", "Clarkia nitens", "Clarkia parviflora", "Clarkia pulcherrima", "Clarkia purpurea hirsuta", "Clarkia purpurea parviflora", "Clarkia quadrivulnera setchelliana", "Clarkia rubicunda rubicunda", "Clarkia tembloriensis subsp. longistyla", "Clarkia tenuifolia", "	
+Clarkia viminea"))
+# we have Clarkia mosquinii but not Clarkia mosquinii mosquinii
+#merge Clarkia Biloba with Clarkia biloba occurrences (make sure you merge with the same datasource)
+#do the same for Clarkia Williamsonii, C. Unguiculata, Clarkia purpurea subsp. Quadrivulnera
+#This filter is not getting rid of some of the things I filtered
+
+table(distinct_noNA_occurrence_subsets$Species_Subspecies)
+
+
+#New approach to get rid of all these species I don't want
+unwanted_species <- c(
+  "Clarkia modesta", "Clarkia springvillensis", "Clarkia heterandra", "Clarkia jolonensis", "Godetia sparsiflora",
+  "Clarkia romanzovii", "Clarkia", "clarkia", "Clarkia deflexa", "Clarkia elegans", "Clarkia grandiflora",
+  "Clarkia tembloriensis longistyla", "Clarkia rubicunda blasdalei", "Clarkia rubicunda subsp. blasdalei",
+  "Heterogaura heterandra", "Clarkia amoena pacifica", "Clarkia mosquinii mosquinii", "Clarkia mosquinii subsp. mosquinii",
+  "Clarkia mosquinii subsp. xerophila", "Clarkia blasdalei", "Clarkia calientensis", "Clarkia bifrons", "Clarkia concinnum",
+  "Clarkia goddardii", "Clarkia lindleyi", "Clarkia mosquinii xerophylla", "Clarkia nitens", "Clarkia parviflora",
+  "Clarkia pulcherrima", "Clarkia purpurea hirsuta", "Clarkia purpurea parviflora", "Clarkia quadrivulnera setchelliana",
+  "Clarkia rubicunda rubicunda", "Clarkia tembloriensis subsp. longistyla", "Clarkia tenuifolia", "Clarkia viminea"
+)
+
+#Filtering out unwanted species
+distinct_noNA_occurrence_subsets_3.0 <- distinct_noNA_occurrence_subsets_2.0 %>%
+  filter(!Species_Subspecies %in% unwanted_species) %>%
+  filter(!str_detect(Species_Subspecies, "Godetia")) %>%
+  mutate(Species_Subspecies = str_replace_all(Species_Subspecies, "Clarkia mildredae", "Clarkia mildrediae"))
+
+# Trying to merge specific occurrences with the same datasource
+distinct_noNA_occurrence_subsets_4.0 <- distinct_noNA_occurrence_subsets_3.0 %>%
+  mutate(Species_Subspecies = case_when(
+    Species_Subspecies %in% c("Clarkia biloba", "Clarkia Biloba") ~ "Clarkia biloba",
+    Species_Subspecies %in% c("Clarkia williamsonii", "Clarkia Williamsonii") ~ "Clarkia williamsonii",
+    Species_Subspecies %in% c("Clarkia unguiculata", "C. Unguiculata") ~ "Clarkia unguiculata",
+    Species_Subspecies %in% c("Clarkia purpurea subsp. Quadrivulnera", "Clarkia purpurea quadrivulnera") ~ "Clarkia purpurea subsp. quadrivulnera",
+    TRUE ~ Species_Subspecies
+  ))
+
+#Ensure only specified species are included
+distinct_noNA_occurrence_subsets_5.0 <- distinct_noNA_occurrence_subsets_4.0 %>%
+  filter(str_detect(str_to_lower(Species_Subspecies), paste(str_to_lower(unwanted_species), collapse = "|")))
+#I'm not sure how this is working cause CHatGPT did this but it's useless anyway
+# hahaha
+
+#species counts table
+distinct_species_counts <- distinct_noNA_occurrence_subsets_5.0 %>%
+  count(Species_Subspecies) %>%
+  arrange(desc(n))
+
+
+
+
+
+
+# Table (this was the original method)
+distinct_species_counts <- distinct_noNA_occurrence_subsets_3.0 %>%
+  count(Species_Subspecies) %>%
+  arrange(desc(n))
+# number 79: Clarkia biloba brandegeeae is spelled wrong 
+# number 101 has the same spelling error: Clarkia biloba subsp. brandegeeae
+# number 160 spelling error: Clarkia biloba brandegeei
+
+
+
+#conclusions: none of this works, it is not filtering things out correctly
+#Maybe I just spelled things wrong, will double check
+
+# MB: you were on the right track and doing a bunch of stuff right! There were just a few tricky things.
+
 
 
 # Maps ----
@@ -232,156 +455,6 @@ ggplot(data = world) +
 
 
 
-
-#Subsetting each data frame ---- 
-# Example code for how to select and rename columns, and filter to a certain range of latitudes
-# new_data = occurrence_data %>% 
-#   select(taxon = species, yr = year) %>% 
-#   filter(decimalLatitude > 35 & decimalLatitude < 55)
-
-# GBIF Subset
-GBIF_subset <- occurrence_speciesclean %>%
-  select(speciesSubspecies, decimalLatitude, decimalLongitude, year, month, day) %>%
-  mutate(datasource = "GBIF") %>%
-  unite(col = date, year, month, day, sep = "-", remove = TRUE) %>%
-  mutate(date = as.Date(date, format = "%Y-%m-%d")) %>%
-  rename(
-    Species_Subspecies = speciesSubspecies,
-    Latitude = decimalLatitude,
-    Longitude = decimalLongitude,
-    Data_Source = datasource
-  ) %>%
-  mutate(Latitude = as.double(Latitude), Longitude = as.double(Longitude))
-
-# INAT Subset
-INAT_subset <- INAT_occurrence_data_columnclean %>%
-  select(scientific_name, latitude, longitude, observed_on) %>%
-  mutate(datasource = "INAT") %>%
-  rename(
-    Species_Subspecies = scientific_name, 
-    Latitude = latitude,
-    Longitude = longitude,
-    date = observed_on,
-    Data_Source = datasource
-  ) %>%
-  mutate(Latitude = as.double(Latitude), Longitude = as.double(Longitude), date = as.Date(date))
-
-# CCH2 Subset
-CCH2_subset <- CCH2_occurrence_data_columnclean %>%
-  select(scientificName, decimalLatitude, decimalLongitude, eventDate, eventDate2) %>%
-  mutate(datasource = "CCH2") %>%
-  rename(
-    Species_Subspecies = scientificName, 
-    Latitude = decimalLatitude,
-    Longitude = decimalLongitude,
-    Data_Source = datasource
-  ) %>%
-  mutate(date = coalesce(eventDate, eventDate2)) %>%
-  select(-eventDate, -eventDate2) %>%
-  mutate(Latitude = as.double(Latitude), Longitude = as.double(Longitude), date = as.Date(date))
-
-# PNW Subset
-PNW_subset <- PNW_occurrence_data_columnclean %>%
-  select(Scientific.Name, Decimal.Latitude, Decimal.Longitude, Day.Collected, Month.Collected, Year.Collected) %>%
-  unite(col = date, Year.Collected, Month.Collected, Day.Collected, sep = "-", remove = TRUE) %>%
-  mutate(date = as.Date(date, format = "%Y-%m-%d")) %>%
-  mutate(datasource = "PNW") %>%
-  rename(
-    Species_Subspecies = Scientific.Name, 
-    Latitude = Decimal.Latitude,
-    Longitude = Decimal.Longitude,
-    Data_Source = datasource
-  ) %>%
-  mutate(Latitude = as.double(Latitude), Longitude = as.double(Longitude))
-
-
-#Smushing subsetted data together ----
-occurrence_subsets_combined <- bind_rows(GBIF_subset, INAT_subset, CCH2_subset, PNW_subset)
-#This doesn't work, I guess because the latitude values are   different types of data (fixed this with mutate: double to    make all of the latitude and longitude values in double       format)
-#Now getting error surrounding the date format (fixed by      making all of the dates the same format)
-
-#Cleaning smushed subsetted data frame ----
-
-##Omitting duplicate rows (i.e. getting rid of duplicate occurrences) ----
-distinct_occurrence_subsets <- occurrence_subsets_combined %>%
-  distinct(Latitude, Longitude, .keep_all = TRUE)
-# I am pretty sure this code only keeps the FIRST occurrence if there are duplicate lat/long coordinates -- double check
-
-##Getting rid of rows with any NAs ----
-distinct_noNA_occurrence_subsets <- distinct_occurrence_subsets %>%
-  drop_na()
-
-##Cleaning: omitting Godetia, merging mildredae, etc. ----
-distinct_noNA_occurrence_subsets_2.0 <- distinct_noNA_occurrence_subsets %>%
-  filter(!str_detect(Species_Subspecies, "Godetia"))
-
-distinct_noNA_occurrence_subsets_3.0 <- distinct_noNA_occurrence_subsets_2.0 %>%
-  mutate(Species_Subspecies = str_replace_all(Species_Subspecies, "Clarkia mildredae", "Clarkia mildrediae")) %>%
-  filter(!Species_Subspecies %in% c("Clarkia modesta", "Clarkia springvillensis", "Clarkia heterandra", "Clarkia jolonensis", "Clarkia australis", "Godetia sparsiflora", "Clarkia romanzovii", "Clarkia", "clarkia","Clarkia deflexa", "Clarkia elegans", "Clarkia grandiflora", "Clarkia tembloriensis longistyla", "Clarkia rubicunda blasdalei", "Clarkia elegans", "Clarkia rubicunda subsp. blasdalei", "Heterogaura heterandra", "Clarkia amoena pacifica", "Clarkia mosquinii mosquinii", "Clarkia mosquinii subsp. mosquinii", "Clarkia mosquinii subsp. xerophila", "Clarkia blasdalei", "Clarkia calientensis", "Clarkia bifrons", "Clarkia concinnum", "Clarkia goddardii", "Clarkia lindleyi", "Clarkia mosquinii xerophylla", "Clarkia nitens", "Clarkia parviflora", "Clarkia pulcherrima", "Clarkia purpurea hirsuta", "Clarkia purpurea parviflora", "Clarkia quadrivulnera setchelliana", "Clarkia rubicunda rubicunda", "Clarkia tembloriensis subsp. longistyla", "Clarkia tenuifolia", "	
-Clarkia viminea"))
-# we have Clarkia mosquinii but not Clarkia mosquinii mosquinii
-#merge Clarkia Biloba with Clarkia biloba occurrences (make sure you merge with the same datasource)
-#do the same for Clarkia Williamsonii, C. Unguiculata, Clarkia purpurea subsp. Quadrivulnera
-#This filter is not getting rid of some of the things I filtered
-
-
-
-
-#New approach to get rid of all these species I don't want
-unwanted_species <- c(
-  "Clarkia modesta", "Clarkia springvillensis", "Clarkia heterandra", "Clarkia jolonensis", "Godetia sparsiflora",
-  "Clarkia romanzovii", "Clarkia", "clarkia", "Clarkia deflexa", "Clarkia elegans", "Clarkia grandiflora",
-  "Clarkia tembloriensis longistyla", "Clarkia rubicunda blasdalei", "Clarkia rubicunda subsp. blasdalei",
-  "Heterogaura heterandra", "Clarkia amoena pacifica", "Clarkia mosquinii mosquinii", "Clarkia mosquinii subsp. mosquinii",
-  "Clarkia mosquinii subsp. xerophila", "Clarkia blasdalei", "Clarkia calientensis", "Clarkia bifrons", "Clarkia concinnum",
-  "Clarkia goddardii", "Clarkia lindleyi", "Clarkia mosquinii xerophylla", "Clarkia nitens", "Clarkia parviflora",
-  "Clarkia pulcherrima", "Clarkia purpurea hirsuta", "Clarkia purpurea parviflora", "Clarkia quadrivulnera setchelliana",
-  "Clarkia rubicunda rubicunda", "Clarkia tembloriensis subsp. longistyla", "Clarkia tenuifolia", "Clarkia viminea"
-)
-
-#Filtering out unwanted species
-distinct_noNA_occurrence_subsets_3.0 <- distinct_noNA_occurrence_subsets_2.0 %>%
-  filter(!Species_Subspecies %in% unwanted_species) %>%
-  filter(!str_detect(Species_Subspecies, "Godetia")) %>%
-  mutate(Species_Subspecies = str_replace_all(Species_Subspecies, "Clarkia mildredae", "Clarkia mildrediae"))
-
-# Trying to merge specific occurrences with the same datasource
-distinct_noNA_occurrence_subsets_4.0 <- distinct_noNA_occurrence_subsets_3.0 %>%
-  mutate(Species_Subspecies = case_when(
-    Species_Subspecies %in% c("Clarkia biloba", "Clarkia Biloba") ~ "Clarkia biloba",
-    Species_Subspecies %in% c("Clarkia williamsonii", "Clarkia Williamsonii") ~ "Clarkia williamsonii",
-    Species_Subspecies %in% c("Clarkia unguiculata", "C. Unguiculata") ~ "Clarkia unguiculata",
-    Species_Subspecies %in% c("Clarkia purpurea subsp. Quadrivulnera", "Clarkia purpurea quadrivulnera") ~ "Clarkia purpurea subsp. quadrivulnera",
-    TRUE ~ Species_Subspecies
-  ))
-
-#Ensure only specified species are included
-distinct_noNA_occurrence_subsets_5.0 <- distinct_noNA_occurrence_subsets_4.0 %>%
-  filter(str_detect(str_to_lower(Species_Subspecies), paste(str_to_lower(unwanted_species), collapse = "|")))
-#I'm not sure how this is working cause CHatGPT did this but it's useless anyway
-
-#species counts table
-distinct_species_counts <- distinct_noNA_occurrence_subsets_5.0 %>%
-  count(Species_Subspecies) %>%
-  arrange(desc(n))
-
-
-
-
-
-
-# Table (this was the original method)
-distinct_species_counts <- distinct_noNA_occurrence_subsets_3.0 %>%
-  count(Species_Subspecies) %>%
-  arrange(desc(n))
-# number 79: Clarkia biloba brandegeeae is spelled wrong 
-# number 101 has the same spelling error: Clarkia biloba subsp. brandegeeae
-# number 160 spelling error: Clarkia biloba brandegeei
-
-
-
-#conclusions: none of this works, it is not filtering things out correctly
-#Maybe I just spelled things wrong, will double check
 
 
 
